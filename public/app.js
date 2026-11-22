@@ -13,6 +13,8 @@
     previewLayer: null,
     scanLayer: null,
     pw: '',
+    armed: false,
+    armTimer: null,
     centreMarker: null,
     targetMarker: null,
   };
@@ -124,6 +126,13 @@
     validateForm();
   }
 
+  function disarm() {
+    state.armed = false;
+    clearTimeout(state.armTimer);
+    $('runBtn').textContent = 'Run scan';
+    $('runBtn').classList.remove('armed');
+  }
+
   function validateForm() {
     $('runBtn').disabled = !(state.target && $('keyword').value.trim() && state.centre);
   }
@@ -188,6 +197,7 @@
   ['size', 'spacing', 'unit'].forEach((id) => $(id).addEventListener('change', () => { if (state.scanId) clearScanView(); previewGrid(); }));
   $('demo').addEventListener('change', previewGrid);
   $('keyword').addEventListener('input', validateForm);
+  ['keyword', 'size', 'spacing', 'unit', 'zoom', 'device', 'demo'].forEach((id) => $(id).addEventListener('input', disarm));
 
   // ---------- Scans ----------
   $('runBtn').addEventListener('click', async () => {
@@ -205,11 +215,19 @@
       device: $('device').value,
       demo: $('demo').checked,
     };
-    if (!body.demo) {
+    // Live scans spend credit: first click arms the button, second click runs it.
+    // (In-page confirm rather than window.confirm, which some embedded browsers block.)
+    if (!body.demo && !state.armed) {
       const n = body.size * body.size;
       const cost = (n * state.config.engines[0].costPerPoint).toFixed(3);
-      if (!confirm(`Run ${n} live searches for about $${cost} of DataForSEO credit?`)) return;
+      state.armed = true;
+      $('runBtn').textContent = `Confirm: run ${n} live searches (~$${cost})`;
+      $('runBtn').classList.add('armed');
+      clearTimeout(state.armTimer);
+      state.armTimer = setTimeout(disarm, 10000);
+      return;
     }
+    disarm();
     $('runBtn').disabled = true;
     try {
       const { id } = await api('/api/scans', { method: 'POST', body: JSON.stringify(body) });
