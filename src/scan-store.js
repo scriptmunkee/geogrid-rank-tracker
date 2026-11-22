@@ -4,6 +4,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { getEngine } from './engines/index.js';
 import { buildScan, runPoint, finaliseScan } from './scan.js';
+import { REPORT_VERSION } from './analysis.js';
 import { mapLimit } from './dataforseo.js';
 import { lookupArea } from './area.js';
 
@@ -45,16 +46,29 @@ export class ScanStore extends DurableObject {
     const row = this.sql.exec('SELECT meta FROM scans WHERE id = ?', id).toArray()[0];
     if (!row) return null;
     const scan = JSON.parse(row.meta);
-    if (scan.status === 'done' && !scan.report) this.upgrade(scan); // scans saved before reports existed
+    // Rebuild reports saved by an older version of the analysis
+    if (scan.status === 'done' && (!scan.report || scan.report.version !== REPORT_VERSION)) this.upgrade(scan);
+    if (scan.status === 'failed' && /No Search Results/i.test(scan.error || '')) this.upgrade(scan, { clearNoResults: true });
     const rows = this.sql.exec('SELECT done, data FROM points WHERE scan_id = ? ORDER BY idx', id).toArray();
     scan.results = rows.map((r) => ({ ...JSON.parse(r.data), pending: r.done === 0 }));
     scan.progress = { done: rows.filter((r) => r.done === 1).length, total: rows.length };
     return scan;
   }
 
-  upgrade(scan) {
+  upgrade(scan, { clearNoResults = false } = {}) {
     const rows = this.sql.exec('SELECT idx, data FROM points WHERE scan_id = ? ORDER BY idx', scan.id).toArray();
     const points = rows.map((r) => JSON.parse(r.data));
+    if (clearNoResults) {
+      // "No Search Results" used to be stored as an error; it means not found
+      for (const p of points) {
+        if (/No Search Results/i.test(p.error || '')) {
+          p.error = null;
+          p.rank = null;
+          p.listings = [];
+        }
+      }
+      scan.error = null;
+    }
     finaliseScan(scan, points, getEngine(scan.engine));
     this.ctx.storage.transactionSync(() => {
       rows.forEach((r, i) => this.sql.exec('UPDATE points SET data = ? WHERE scan_id = ? AND idx = ?', JSON.stringify(points[i]), scan.id, r.idx));

@@ -13,12 +13,18 @@ export function nameKey(s) {
     .trim();
 }
 
+const GOOGLE_HOST = /(^|\.)google\.[a-z]{2,3}(\.[a-z]{2})?$/;
+
+/** Bare domain, or null for empty values and Google's own redirect/viewer hosts. */
 export function cleanDomain(d) {
-  return String(d || '')
+  const s = String(d || '')
     .toLowerCase()
+    .trim()
     .replace(/^https?:\/\//, '')
     .replace(/^(www|m)\./, '')
-    .replace(/\/.*$/, '');
+    .replace(/[/?#].*$/, '');
+  if (!s || GOOGLE_HOST.test(s)) return null;
+  return s;
 }
 
 /** Does this listing belong to the target business? CID first, then place ID, then name. */

@@ -154,7 +154,7 @@
   }
 
   function validateForm() {
-    $('runBtn').disabled = !(state.target && $('keyword').value.trim() && state.centre);
+    $('runBtn').disabled = Boolean(state.starting) || !(state.target && $('keyword').value.trim() && state.centre);
   }
 
   function showError(msg) {
@@ -244,16 +244,25 @@
       state.armTimer = setTimeout(disarm, 10000);
       return;
     }
+    if (state.starting) return;
     disarm();
+    state.starting = true;
     $('runBtn').disabled = true;
+    $('runBtn').textContent = 'Starting scan…';
     try {
       const { id } = await api('/api/scans', { method: 'POST', body: JSON.stringify(body) });
+      $('runBtn').textContent = 'Scan started';
       await openScan(id);
       loadHistory();
     } catch (err) {
       showError(err.message);
     } finally {
-      validateForm();
+      // Short cool-down so a double click can't start the same scan twice
+      setTimeout(() => {
+        state.starting = false;
+        $('runBtn').textContent = 'Run scan';
+        validateForm();
+      }, 4000);
     }
   });
 
@@ -616,7 +625,7 @@
       </div>
       <div class="two-col">
         <div class="card"><h3>Websites the AI cited</h3>
-          <table class="mini"><thead><tr><th>Website</th><th>Type</th><th>Cited at</th></tr></thead><tbody>${a.sources
+          <table class="mini"><thead><tr><th>Website or source</th><th>Type</th><th>Cited at</th></tr></thead><tbody>${a.sources
             .map((s) => `<tr class="${s.category === 'you' ? 'is-target' : ''}"><td>${esc(s.domain)}</td><td><span class="chip cat-${s.category}">${CAT_LABEL[s.category]}</span></td><td><span class="bar small"><i style="width:${(s.points / maxSrc) * 100}%"></i></span> ${s.points} of ${a.shownAt}</td></tr>`)
             .join('') || '<tr><td colspan="3">No sources recorded.</td></tr>'}</tbody></table>
         </div>
@@ -708,7 +717,12 @@
   }
 
   function mdLite(md) {
-    const lines = esc(md).split('\n');
+    const clean = String(md || '')
+      .replace(/\[\[\d+\]\]\([^)]*\)/g, '')
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/`/g, '')
+      .replace(/^#{1,6}\s*(.*)$/gm, '**$1**');
+    const lines = esc(clean).split('\n');
     let html = '';
     let inList = false;
     for (const raw of lines) {

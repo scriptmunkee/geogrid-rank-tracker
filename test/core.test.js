@@ -186,12 +186,37 @@ test('search: cost per point', () => {
   assert.equal(searchEngine.costPerPoint({ aio: true, finder: true, device: 'desktop' }), 0.006);
 });
 
-test('ai: names found in order, including bold list items not in local results', () => {
+test('ai: local names found in order, sentence by sentence', () => {
   const known = new Map([[nameKey('Alpha Plumbing'), 'Alpha Plumbing'], [nameKey('Bravo Plumbing'), 'Bravo Plumbing']]);
-  const named = namedInAio(organicFixture.result[0].items[2].markdown, known);
-  assert.deepEqual(named.map((n) => n.title), ['Rapid National Plumbing', 'Bravo Plumbing', 'Alpha Plumbing']);
-  assert.equal(named[0].local, false);
-  assert.ok(!named.some((n) => /What to check/.test(n.title)));
+  const named = namedInAio(organicFixture.result[0].items[2].markdown, known, { keyword: 'plumber' });
+  assert.deepEqual(named.map((n) => n.title), ['Bravo Plumbing', 'Alpha Plumbing']);
+});
+
+test('ai: real-world cases from live scans', () => {
+  // Local AI answer naming businesses in bold, with citation markers
+  const local = '**Dixon Digital Marketing Ltd** operates as a dedicated **marketing consultant** nearby, while **Right Hook - Marketing Agency** and **Stick Marketing** are full agencies.[[1]](https://google.com/goto?url=x)';
+  const known = new Map(['Dixon Digital Marketing Ltd', 'Right Hook - Marketing Agency', 'Stick Marketing', 'UK AI SEO Consultant', 'Ascend Digital Marketing'].map((t) => [nameKey(t), t]));
+  assert.deepEqual(namedInAio(local, known, { keyword: 'seo consultant' }).map((n) => n.title), ['Dixon Digital Marketing Ltd', 'Right Hook - Marketing Agency', 'Stick Marketing']);
+
+  // Generic answer: a listing called "UK AI SEO Consultant" must not match prose about AI SEO consultants
+  const generic = '#### Notable Consultants\n- **Independent Consultants:** Specialists such as Luca Tagliaferro (focusing on AI search in the UK) and Chris Raulf.\n- **UK Agencies:** Agencies offering AI SEO include Found, Envisage Digital, Sherbet Donkey.\n#### How do you measure AI visibility?\nAn AI SEO consultant helps businesses get cited.';
+  const named = namedInAio(generic, known, { keyword: 'ai seo consultant', sources: ['Luca Tagliaferro', 'Chris Raulf', 'Envisage Digital', 'YouTube', 'Digital Marketing Agency London'] });
+  const titles = named.map((n) => n.title);
+  assert.deepEqual(titles, ['Luca Tagliaferro', 'Chris Raulf', 'Envisage Digital']);
+  assert.ok(named.every((n) => !n.local));
+  assert.ok(!titles.includes('UK AI SEO Consultant'));
+
+  // ...but an exact-case mention of a keyword-named business still counts
+  assert.equal(namedInAio('Try UK AI SEO Consultant for audits.', known, { keyword: 'ai seo consultant' })[0].title, 'UK AI SEO Consultant');
+});
+
+test('search: Google viewer and redirect links are not websites', () => {
+  const o = parseOrganic({ result: [{ items: [
+    { type: 'local_pack', rank_absolute: 1, title: 'Power SEO', cid: '5', domain: 'google.com', url: 'https://www.google.com/searchviewer/10', is_paid: false },
+    { type: 'ai_overview', rank_absolute: 2, markdown: 'x', references: [{ source: 'Envisage Digital', domain: 'google.com', url: 'https://google.com/goto?url=abc' }, { source: 'Found', domain: 'found.co.uk', url: 'https://found.co.uk/' }] },
+  ] }] });
+  assert.equal(o.single.domain, null);
+  assert.deepEqual(o.aio.references.map((r) => [r.source, r.domain]), [['Envisage Digital', null], ['Found', 'found.co.uk']]);
 });
 
 test('area: IoD 2025 lookup and distance parsing', () => {

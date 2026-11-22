@@ -32,35 +32,70 @@ function affluenceWeight(p) {
 
 // ---------- AI Overview text analysis ----------
 
-const LIST_LEAD = /^\s*(?:[*\-•]|\d+\.)\s+\*\*([^*\n]{3,70})\*\*/gm;
+export const REPORT_VERSION = 2;
 
-/** Find which businesses an AI Overview names, in the order it names them. */
-export function namedInAio(markdown, knownNames) {
-  const text = ` ${nameKey(markdown)} `;
+const PLATFORMS = new Set(['youtube', 'google', 'reddit', 'facebook', 'linkedin', 'wikipedia', 'instagram', 'tiktok', 'twitter', 'quora', 'medium', 'x', 'yelp', 'yell', 'trustpilot', 'gov uk']);
+const FILLER = new Set(['uk', 'local', 'best', 'top', 'near', 'me', 'the', 'and', 'services', 'service', 'company', 'specialist', 'specialists', 'expert', 'experts', 'in', 'of', 'for']);
+
+/** Plain text of an AI Overview, split into sentence-like segments (names never span two). */
+export function aioSegments(markdown) {
+  const plain = String(markdown || '')
+    .replace(/\[\[\d+\]\]\([^)]*\)/g, ' ') // citation markers
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // links
+    .replace(/[`*#>_]/g, ' ');
+  return plain
+    .split(/[.!?;:\n()|]+/)
+    .map((x) => x.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+}
+
+/**
+ * Find which businesses an AI Overview names, in the order it names them.
+ * knownNames: Map(nameKey -> title) of every business seen in the local results.
+ * sources: AI Overview reference source names (catches businesses that aren't in the local results).
+ * keyword: the scan keyword; a name made only of keyword words must match with exact capitalisation.
+ */
+export function namedInAio(markdown, knownNames, { sources = [], keyword = '' } = {}) {
+  const segs = aioSegments(markdown);
+  const segKeys = segs.map((x) => ` ${nameKey(x)} `);
+  const kwTokens = new Set(nameKey(keyword).split(' ').filter(Boolean));
   const found = new Map();
+
+  const locate = (title, key) => {
+    const tokens = key.split(' ').filter(Boolean);
+    const generic = tokens.every((t) => kwTokens.has(t) || FILLER.has(t));
+    for (let i = 0; i < segs.length; i++) {
+      if (generic) {
+        const j = segs[i].indexOf(title.replace(/\s+/g, ' ').trim());
+        if (j >= 0) return i * 10000 + j;
+      } else {
+        const j = segKeys[i].indexOf(` ${key} `);
+        if (j >= 0) return i * 10000 + j;
+      }
+    }
+    return -1;
+  };
+
   for (const [key, title] of knownNames) {
-    if (key.length < 4) continue;
-    const idx = text.indexOf(` ${key} `);
-    if (idx >= 0 && !found.has(key)) found.set(key, { title, idx, local: true });
-  }
-  // Bold list leads ("* **Name**: ...") that aren't in the local results
-  for (const m of String(markdown || '').matchAll(LIST_LEAD)) {
-    const raw = m[1].trim().replace(/[:.]$/, '');
-    if (!raw || /:$/.test(m[1].trim())) continue;
-    const key = nameKey(raw);
     if (key.length < 4 || found.has(key)) continue;
-    if ([...found.keys()].some((k) => k.includes(key) || key.includes(k))) continue;
-    const idx = text.indexOf(` ${key} `);
-    found.set(key, { title: raw, idx: idx >= 0 ? idx : Number.MAX_SAFE_INTEGER, local: false });
+    const pos = locate(title, key);
+    if (pos >= 0) found.set(key, { title, pos, local: true });
   }
-  return [...found.entries()].sort((a, b) => a[1].idx - b[1].idx).map(([key, v]) => ({ key, title: v.title, local: v.local }));
+  for (const src of sources) {
+    const key = nameKey(src);
+    if (!key || key.length < 4 || PLATFORMS.has(key) || found.has(key)) continue;
+    if ([...found.keys()].some((k) => k.includes(key) || key.includes(k))) continue;
+    const pos = locate(src, key);
+    if (pos >= 0) found.set(key, { title: src, pos, local: false });
+  }
+  return [...found.entries()].sort((a, b) => a[1].pos - b[1].pos).map(([key, v]) => ({ key, title: v.title, local: v.local }));
 }
 
 function domainCategory(domain, targetDomain, competitorDomains) {
   if (!domain) return 'other';
   if (targetDomain && (domain === targetDomain || domain.endsWith(`.${targetDomain}`))) return 'you';
-  if (competitorDomains.has(domain)) return 'competitor';
   if (DIRECTORY_DOMAINS.has(domain) || [...DIRECTORY_DOMAINS].some((d) => domain.endsWith(`.${d}`))) return 'directory';
+  if (competitorDomains.has(domain)) return 'competitor';
   return 'other';
 }
 
@@ -155,6 +190,7 @@ export function buildReport(scan, points, engine) {
   }
 
   const report = {
+    version: REPORT_VERSION,
     engine: scan.engine,
     summary,
     distribution,
@@ -227,10 +263,19 @@ export function buildReport(scan, points, engine) {
         continue;
       }
       shownAt++;
-      const named = namedInAio(p.aio.markdown, known);
-      const sources = [...new Set((p.aio.references || []).map((r) => r.domain).filter(Boolean))];
+      const refs = p.aio.references || [];
+      const named = namedInAio(p.aio.markdown, known, { sources: refs.map((r) => r.source).filter(Boolean), keyword: scan.keyword });
+      // A source is its website, or its name when Google only gave a redirect link
+      const sourceMap = new Map();
+      for (const r of refs) {
+        const label = cleanDomain(r.domain) || (r.source ? r.source.trim() : null);
+        if (label && !sourceMap.has(label)) sourceMap.set(label, { label, domain: cleanDomain(r.domain), name: r.source || null });
+      }
+      const sources = [...sourceMap.keys()];
       const placeIdx = named.findIndex((x) => x.key === targetKey);
-      const targetCited = Boolean(targetDomain && sources.some((d) => d === targetDomain || d.endsWith(`.${targetDomain}`)));
+      const targetCited = [...sourceMap.values()].some(
+        (x) => (targetDomain && x.domain && (x.domain === targetDomain || x.domain.endsWith(`.${targetDomain}`))) || (x.name && nameKey(x.name) === targetKey),
+      );
       p.ai = {
         shown: true,
         named: named.map((x) => x.title),
@@ -253,10 +298,15 @@ export function buildReport(scan, points, engine) {
         if (i === 0) row.firstAt++;
         aiNamed.set(x.key, row);
       });
-      for (const d of sources) {
-        const row = cited.get(d) || { domain: d, points: 0, category: domainCategory(d, targetDomain, competitorDomains) };
+      for (const x of sourceMap.values()) {
+        let category = domainCategory(x.domain, targetDomain, competitorDomains);
+        if (!x.domain && x.name) {
+          const k = nameKey(x.name);
+          category = k === targetKey ? 'you' : known.has(k) ? 'competitor' : PLATFORMS.has(k) ? 'directory' : 'other';
+        }
+        const row = cited.get(x.label) || { domain: x.label, isDomain: Boolean(x.domain), points: 0, category };
         row.points++;
-        cited.set(d, row);
+        cited.set(x.label, row);
       }
     }
 

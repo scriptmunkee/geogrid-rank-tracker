@@ -38,6 +38,7 @@ export async function postLiveTask(env, path, task, { retries = 3 } = {}) {
       }
       const t = body.tasks && body.tasks[0];
       if (!t) throw new DataForSEOError('Empty task response', 'empty');
+      if (t.status_code === 40102) return { ...t, result: [{ items: [] }] }; // No Search Results
       if (t.status_code !== 20000) {
         throw new DataForSEOError(t.status_message || 'Task failed', t.status_code >= 50000 ? 'retry' : String(t.status_code));
       }

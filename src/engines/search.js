@@ -68,7 +68,8 @@ export function parseOrganic(task) {
       const key = r.url || `${r.domain}|${r.title}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      references.push({ source: r.source || null, domain: cleanDomain(r.domain || r.url), url: r.url || null, title: r.title || null });
+      const domain = cleanDomain(r.domain) || cleanDomain(r.url);
+      references.push({ source: r.source || null, domain, url: domain ? r.url || null : null, title: r.title || null });
       if (references.length >= 25) break;
     }
     aio = { markdown, references, async: Boolean(aioItem.asynchronous_ai_overview) };
