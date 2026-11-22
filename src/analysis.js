@@ -32,7 +32,7 @@ function affluenceWeight(p) {
 
 // ---------- AI Overview text analysis ----------
 
-export const REPORT_VERSION = 2;
+export const REPORT_VERSION = 3;
 
 const PLATFORMS = new Set(['youtube', 'google', 'reddit', 'facebook', 'linkedin', 'wikipedia', 'instagram', 'tiktok', 'twitter', 'quora', 'medium', 'x', 'yelp', 'yell', 'trustpilot', 'gov uk']);
 const FILLER = new Set(['uk', 'local', 'best', 'top', 'near', 'me', 'the', 'and', 'services', 'service', 'company', 'specialist', 'specialists', 'expert', 'experts', 'in', 'of', 'for']);
@@ -91,11 +91,23 @@ export function namedInAio(markdown, knownNames, { sources = [], keyword = '' } 
   return [...found.entries()].sort((a, b) => a[1].pos - b[1].pos).map(([key, v]) => ({ key, title: v.title, local: v.local }));
 }
 
-function domainCategory(domain, targetDomain, competitorDomains) {
+const compact = (s) => nameKey(s).replace(/ /g, '');
+
+/** Does a website look like it belongs to this business name? (ukaiseoconsultant.co.uk ~ "UK AI SEO Consultant") */
+function domainMatchesName(domain, title) {
+  const base = String(domain || '').split('.')[0].replace(/[^a-z0-9]/g, '');
+  if (base.length < 5) return false;
+  const raw = String(title || '').toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]/g, '');
+  return [compact(title), raw].some((name) => name.length >= 5 && (base === name || base.startsWith(name) || name.startsWith(base)));
+}
+
+function domainCategory(domain, targetDomain, competitorDomains, { targetTitle, competitorTitles = [] } = {}) {
   if (!domain) return 'other';
   if (targetDomain && (domain === targetDomain || domain.endsWith(`.${targetDomain}`))) return 'you';
+  if (targetTitle && domainMatchesName(domain, targetTitle)) return 'you';
   if (DIRECTORY_DOMAINS.has(domain) || [...DIRECTORY_DOMAINS].some((d) => domain.endsWith(`.${d}`))) return 'directory';
   if (competitorDomains.has(domain)) return 'competitor';
+  if (competitorTitles.some((t) => domainMatchesName(domain, t))) return 'competitor';
   return 'other';
 }
 
@@ -247,6 +259,7 @@ export function buildReport(scan, points, engine) {
     const targetKey = nameKey(target.title);
     const targetDomain = cleanDomain(target.domain);
     const competitorDomains = new Set([...byKey.values()].filter((c) => !c.isTarget && c.domain).map((c) => c.domain));
+    const competitorTitles = [...byKey.values()].filter((c) => !c.isTarget).map((c) => c.title);
 
     const aiNamed = new Map();
     const cited = new Map();
@@ -268,7 +281,7 @@ export function buildReport(scan, points, engine) {
       // A source is its website, or its name when Google only gave a redirect link
       const sourceMap = new Map();
       for (const r of refs) {
-        const label = cleanDomain(r.domain) || (r.source ? r.source.trim() : null);
+        const label = cleanDomain(r.domain) || (r.source ? r.source.trim().replace(/^(https?:\/\/)?www\./i, '') : null);
         if (label && !sourceMap.has(label)) sourceMap.set(label, { label, domain: cleanDomain(r.domain), name: r.source || null });
       }
       const sources = [...sourceMap.keys()];
@@ -299,7 +312,7 @@ export function buildReport(scan, points, engine) {
         aiNamed.set(x.key, row);
       });
       for (const x of sourceMap.values()) {
-        let category = domainCategory(x.domain, targetDomain, competitorDomains);
+        let category = domainCategory(x.domain, targetDomain, competitorDomains, { targetTitle: target.title, competitorTitles });
         if (!x.domain && x.name) {
           const k = nameKey(x.name);
           category = k === targetKey ? 'you' : known.has(k) ? 'competitor' : PLATFORMS.has(k) ? 'directory' : 'other';

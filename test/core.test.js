@@ -249,3 +249,16 @@ test('search scan: demo end to end builds the full report', async () => {
   assert.ok(r.competitors.some((c) => c.isTarget && c.aiNamedAt != null));
   assert.ok(r.insights.some((x) => x.kind === 'ai'));
 });
+
+test('ai: a cited website is matched to a local business by name', async () => {
+  const { buildReport } = await import('../src/analysis.js');
+  const scan = { engine: 'google_search', depth: 20, keyword: 'ai seo consultant', options: { aio: true }, grid: { lat: 54, lng: -1, unit: 'km' },
+    target: { title: 'Ascend Digital Marketing', cid: '1', domain: 'ascenddigitalmarketing.co.uk', lat: 54, lng: -1 } };
+  const points = [{ lat: 54, lng: -1, rank: 2, listings: [{ rank: 1, title: 'UK AI SEO Consultant', cid: '7', domain: null }, { rank: 2, title: 'Ascend Digital Marketing', cid: '1' }],
+    aio: { markdown: 'Some text.', references: [{ source: 'UK AI SEO', domain: 'ukaiseoconsultant.co.uk' }, { source: 'Yell', domain: 'yell.com' }, { source: 'www.example.com', domain: null }] } }];
+  const r = buildReport(scan, points, { matchesTarget: () => false });
+  const cats = Object.fromEntries(r.search.ai.sources.map((x) => [x.domain, x.category]));
+  assert.equal(cats['ukaiseoconsultant.co.uk'], 'competitor');
+  assert.equal(cats['yell.com'], 'directory');
+  assert.ok('example.com' in cats);
+});
