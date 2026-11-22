@@ -1,23 +1,15 @@
 // Grid generation: N x N points centred on a coordinate.
 
 const KM_PER_DEG_LAT = 111.32;
-const KM_PER_MILE = 1.609344;
+export const KM_PER_MILE = 1.609344;
 
-function round7(n) {
-  return Math.round(n * 1e7) / 1e7;
-}
+const round7 = (n) => Math.round(n * 1e7) / 1e7;
 
 /**
- * Build a square grid of points.
- * @param {object} o
- * @param {number} o.lat centre latitude
- * @param {number} o.lng centre longitude
- * @param {number} o.size points per side (odd number, 3 to 15)
- * @param {number} o.spacing distance between neighbouring points
- * @param {'km'|'mi'} [o.unit]
+ * Build a square grid of points. Row 0 is the north edge.
  * @returns {Array<{row:number,col:number,lat:number,lng:number,distanceKm:number}>}
  */
-function buildGrid({ lat, lng, size, spacing, unit = 'km' }) {
+export function buildGrid({ lat, lng, size, spacing, unit = 'km' }) {
   if (!Number.isFinite(lat) || lat < -85 || lat > 85) throw new Error('Invalid centre latitude');
   if (!Number.isFinite(lng) || lng < -180 || lng > 180) throw new Error('Invalid centre longitude');
   if (!Number.isInteger(size) || size < 3 || size > 15 || size % 2 === 0) {
@@ -29,10 +21,9 @@ function buildGrid({ lat, lng, size, spacing, unit = 'km' }) {
   const half = (size - 1) / 2;
   const kmPerDegLng = KM_PER_DEG_LAT * Math.cos((lat * Math.PI) / 180);
   const points = [];
-
   for (let row = 0; row < size; row++) {
     for (let col = 0; col < size; col++) {
-      const dyKm = (half - row) * stepKm; // row 0 is the north edge
+      const dyKm = (half - row) * stepKm;
       const dxKm = (col - half) * stepKm;
       points.push({
         row,
@@ -45,5 +36,3 @@ function buildGrid({ lat, lng, size, spacing, unit = 'km' }) {
   }
   return points;
 }
-
-module.exports = { buildGrid, KM_PER_MILE };

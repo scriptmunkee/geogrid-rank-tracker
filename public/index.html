@@ -95,6 +95,16 @@
     </main>
   </div>
 
+  <div id="login" class="login" hidden>
+    <form id="loginForm" class="login-card">
+      <h2>GeoGrid Rank Tracker</h2>
+      <p>Enter the app password to run scans.</p>
+      <input id="loginPw" type="password" placeholder="Password" autocomplete="current-password" />
+      <button class="btn primary" type="submit">Unlock</button>
+      <p id="loginError" class="error" hidden></p>
+    </form>
+  </div>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="/app.js"></script>
 </body>

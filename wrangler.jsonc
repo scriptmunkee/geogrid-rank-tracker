@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "geogrid-rank-tracker",
+  "main": "src/worker.js",
+  "compatibility_date": "2025-09-01",
+  "assets": { "directory": "./public", "binding": "ASSETS" },
+  "durable_objects": {
+    "bindings": [{ "name": "SCANS", "class_name": "ScanStore" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ScanStore"] }],
+  "vars": {
+    "DEFAULT_LAT": "54.7761",
+    "DEFAULT_LNG": "-1.5733",
+    "DEFAULT_LOCATION": "United Kingdom",
+    "DEFAULT_LANGUAGE": "en",
+    "SCAN_CONCURRENCY": "5"
+  },
+  "observability": { "enabled": true }
+}

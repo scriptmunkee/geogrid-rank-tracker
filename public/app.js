@@ -12,16 +12,53 @@
     poll: null,
     previewLayer: null,
     scanLayer: null,
+    pw: '',
     centreMarker: null,
     targetMarker: null,
   };
 
+  const storage = {
+    get() { try { return localStorage.getItem('geogrid-pw') || ''; } catch { return state.pw || ''; } },
+    set(v) { state.pw = v; try { localStorage.setItem('geogrid-pw', v); } catch {} },
+    clear() { state.pw = ''; try { localStorage.removeItem('geogrid-pw'); } catch {} },
+  };
+
   const api = async (path, opts = {}) => {
-    const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+    const headers = { 'Content-Type': 'application/json' };
+    const pw = storage.get();
+    if (pw) headers.Authorization = `Bearer ${pw}`;
+    const res = await fetch(path, { ...opts, headers });
     const body = await res.json().catch(() => ({}));
+    if (res.status === 401) {
+      showLogin();
+      throw new Error('Password required');
+    }
     if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
     return body;
   };
+
+  function showLogin(msg) {
+    $('login').hidden = false;
+    $('loginError').hidden = !msg;
+    $('loginError').textContent = msg || '';
+    $('loginPw').focus();
+  }
+
+  $('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    storage.set($('loginPw').value);
+    try {
+      await api('/api/auth-check');
+      $('login').hidden = true;
+      $('loginPw').value = '';
+      showError('');
+      previewGrid();
+      loadHistory();
+    } catch {
+      storage.clear();
+      showLogin('That password did not work');
+    }
+  });
 
   // ---------- Map ----------
   const map = L.map('map', { zoomControl: true });
@@ -240,7 +277,7 @@
 
     if (state.scanLayer) state.scanLayer.remove();
     const markers = scan.results.map((p) => {
-      const pending = running && !p.error && p.rank == null && p.listings.length === 0;
+      const pending = running && p.pending;
       return L.marker([p.lat, p.lng], { icon: pinIcon({ ...p, pending }, scan.depth) }).bindPopup(() => popupHtml(p, scan), { maxWidth: 300 });
     });
     state.scanLayer = L.layerGroup(markers).addTo(map);
@@ -293,11 +330,14 @@
   (async () => {
     state.config = await api('/api/config');
     const badge = $('modeBadge');
-    if (state.config.hasCredentials) {
+    const c = state.config;
+    if (c.live) {
       badge.textContent = 'Live · DataForSEO connected';
       badge.className = 'badge live';
     } else {
-      badge.textContent = 'Demo mode · add DataForSEO keys to .env';
+      badge.textContent = !c.hasCredentials
+        ? 'Demo mode · DataForSEO keys not set'
+        : 'Demo mode · set APP_PASSWORD to enable live scans';
       badge.className = 'badge demo';
       $('demo').checked = true;
       $('demo').disabled = true;
@@ -305,6 +345,7 @@
     const d = state.config.defaults;
     map.setView([d.lat, d.lng], 12);
     setCentre(d.lat, d.lng);
-    loadHistory();
+    if (c.authRequired && !storage.get()) showLogin();
+    else loadHistory().catch(() => {});
   })().catch((err) => showError(err.message));
 })();

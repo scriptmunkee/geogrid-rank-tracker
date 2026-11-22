@@ -41,7 +41,8 @@ Depth 20 costs the same as depth 100 (billed per 100 results).
 - [x] Metrics: ARP, ATRP, SoLV, found count
 - [x] Competitor table across the grid
 - [x] Light-mode map UI (pins coloured by rank, click a pin for the top 20 at that point)
-- [x] Scan history saved as JSON
+- [x] Scan history stored in a Cloudflare Durable Object (SQLite)
+- [x] Hosted on Cloudflare Workers, deployed from GitHub, password protected
 - [x] Demo mode (no API calls) for testing the UI
 - [x] Engine interface so new "engines" plug into the same grid
 
@@ -66,4 +67,4 @@ First job in phase 2 is a validation test: run one keyword on a 5 x 5 grid and c
 - Scheduled rescans (weekly) and scan-to-scan comparison
 - Multi-keyword scans per business
 - Export (CSV, shareable report page)
-- Optional move of storage to SQLite
+

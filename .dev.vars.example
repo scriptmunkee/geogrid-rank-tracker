@@ -1,0 +1,4 @@
+# Local development secrets (copy to .dev.vars). In production set these as Cloudflare secrets.
+DATAFORSEO_LOGIN=
+DATAFORSEO_PASSWORD=
+APP_PASSWORD=
