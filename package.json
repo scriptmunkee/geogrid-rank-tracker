@@ -1,0 +1,13 @@
+{
+  "name": "geogrid-rank-tracker",
+  "version": "0.1.0",
+  "description": "Local Falcon style grid rank tracker on DataForSEO, built to extend to AI Overviews",
+  "main": "server.js",
+  "private": false,
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  }
+}
