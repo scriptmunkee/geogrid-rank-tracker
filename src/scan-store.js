@@ -5,6 +5,9 @@ import { DurableObject } from 'cloudflare:workers';
 import { getEngine } from './engines/index.js';
 import { buildScan, runPoint, finaliseScan } from './scan.js';
 import { mapLimit } from './dataforseo.js';
+import { lookupArea } from './area.js';
+
+const BATCH = 60; // points per alarm run, keeps each run well inside the 15 minute alarm limit
 
 export class ScanStore extends DurableObject {
   constructor(ctx, env) {
@@ -42,10 +45,21 @@ export class ScanStore extends DurableObject {
     const row = this.sql.exec('SELECT meta FROM scans WHERE id = ?', id).toArray()[0];
     if (!row) return null;
     const scan = JSON.parse(row.meta);
+    if (scan.status === 'done' && !scan.report) this.upgrade(scan); // scans saved before reports existed
     const rows = this.sql.exec('SELECT done, data FROM points WHERE scan_id = ? ORDER BY idx', id).toArray();
     scan.results = rows.map((r) => ({ ...JSON.parse(r.data), pending: r.done === 0 }));
     scan.progress = { done: rows.filter((r) => r.done === 1).length, total: rows.length };
     return scan;
+  }
+
+  upgrade(scan) {
+    const rows = this.sql.exec('SELECT idx, data FROM points WHERE scan_id = ? ORDER BY idx', scan.id).toArray();
+    const points = rows.map((r) => JSON.parse(r.data));
+    finaliseScan(scan, points, getEngine(scan.engine));
+    this.ctx.storage.transactionSync(() => {
+      rows.forEach((r, i) => this.sql.exec('UPDATE points SET data = ? WHERE scan_id = ? AND idx = ?', JSON.stringify(points[i]), scan.id, r.idx));
+      this.sql.exec('UPDATE scans SET meta = ? WHERE id = ?', JSON.stringify(scan), scan.id);
+    });
   }
 
   listScans() {
@@ -60,6 +74,7 @@ export class ScanStore extends DurableObject {
           status: s.status,
           demo: s.demo,
           engine: s.engine,
+          device: s.device,
           keyword: s.keyword,
           business: s.target && s.target.title,
           gridSize: s.grid.size,
@@ -69,43 +84,50 @@ export class ScanStore extends DurableObject {
   }
 
   async alarm() {
-    const running = this.sql.exec("SELECT meta FROM scans WHERE status = 'running' ORDER BY created_at").toArray();
-    for (const row of running) {
-      await this.process(JSON.parse(row.meta));
-    }
+    const running = this.sql.exec("SELECT meta FROM scans WHERE status = 'running' ORDER BY created_at LIMIT 1").toArray();
+    if (running.length) await this.process(JSON.parse(running[0].meta));
     const left = this.sql.exec("SELECT COUNT(*) AS n FROM scans WHERE status = 'running'").one().n;
-    if (left > 0) await this.ctx.storage.setAlarm(Date.now() + 500);
+    if (left > 0) await this.ctx.storage.setAlarm(Date.now() + 250);
   }
 
   async process(scan) {
     const engine = getEngine(scan.engine);
     const pending = this.sql
-      .exec('SELECT idx, data FROM points WHERE scan_id = ? AND done = 0 ORDER BY idx', scan.id)
+      .exec('SELECT idx, data FROM points WHERE scan_id = ? AND done = 0 ORDER BY idx LIMIT ?', scan.id, BATCH)
       .toArray()
       .map((r) => ({ idx: r.idx, point: JSON.parse(r.data) }));
 
     let fatal = null;
-    await mapLimit(pending, Number(this.env.SCAN_CONCURRENCY || 5), async ({ idx, point }) => {
-      if (fatal) return;
-      await runPoint(scan, point, engine, this.env);
-      if (point.fatal) {
-        fatal = point.error;
-        return;
-      }
-      this.sql.exec('UPDATE points SET done = 1, data = ? WHERE scan_id = ? AND idx = ?', JSON.stringify(point), scan.id, idx);
-    });
+    if (pending.length) {
+      await mapLimit(pending, Number(this.env.SCAN_CONCURRENCY || 8), async ({ idx, point }) => {
+        if (fatal) return;
+        await runPoint(scan, point, engine, this.env, { areaLookup: (lat, lng) => lookupArea(lat, lng) });
+        if (point.fatal) {
+          fatal = point.error;
+          return;
+        }
+        delete point.fatal;
+        this.sql.exec('UPDATE points SET done = 1, data = ? WHERE scan_id = ? AND idx = ?', JSON.stringify(point), scan.id, idx);
+      });
+    }
 
     if (fatal) {
       scan.status = 'failed';
       scan.error = fatal;
       scan.finishedAt = new Date().toISOString();
-    } else {
-      const points = this.sql
-        .exec('SELECT data FROM points WHERE scan_id = ? ORDER BY idx', scan.id)
-        .toArray()
-        .map((r) => JSON.parse(r.data));
-      finaliseScan(scan, points, engine);
+      this.sql.exec('UPDATE scans SET status = ?, meta = ? WHERE id = ?', scan.status, JSON.stringify(scan), scan.id);
+      return;
     }
-    this.sql.exec('UPDATE scans SET status = ?, meta = ? WHERE id = ?', scan.status, JSON.stringify(scan), scan.id);
+
+    const remaining = this.sql.exec('SELECT COUNT(*) AS n FROM points WHERE scan_id = ? AND done = 0', scan.id).one().n;
+    if (remaining > 0) return; // next alarm picks up the rest
+
+    const rows = this.sql.exec('SELECT idx, data FROM points WHERE scan_id = ? ORDER BY idx', scan.id).toArray();
+    const points = rows.map((r) => JSON.parse(r.data));
+    finaliseScan(scan, points, engine);
+    this.ctx.storage.transactionSync(() => {
+      rows.forEach((r, i) => this.sql.exec('UPDATE points SET data = ? WHERE scan_id = ? AND idx = ?', JSON.stringify(points[i]), scan.id, r.idx));
+      this.sql.exec('UPDATE scans SET status = ?, meta = ? WHERE id = ?', scan.status, JSON.stringify(scan), scan.id);
+    });
   }
 }

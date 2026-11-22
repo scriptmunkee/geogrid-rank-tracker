@@ -27,6 +27,16 @@ npm run dev                      # http://localhost:8787
 npm test
 ```
 
+## Scan types
+
+| | Google Maps | Google Search |
+|---|---|---|
+| What it checks | Rank in Google Maps results | What a searcher sees on the results page: map pack, single-business result (1-Box), AI Overview, ads, Local Finder rank |
+| Cost per point (Live) | $0.002 | Up to $0.008 (AI Overview and Local Finder are optional) |
+| Extra screens | | AI Overview tab, ads and 1-Box panels, AI map layer |
+
+Both include an **Area affluence** layer for points in England (postcodes.io + English Indices of Deprivation 2025), used for an affluence-weighted share of local voice.
+
 ## Using it
 
 1. **Business**: search the name and town, pick the listing (locks its Google CID)
@@ -44,6 +54,9 @@ Click any pin to see the top 20 from that spot.
 | `src/scan-store.js` | Durable Object: SQLite storage, runs scans in the background with alarms |
 | `src/grid.js` | Builds the N x N grid of coordinates |
 | `src/engines/maps.js` | One Maps SERP per point (`location_coordinate: lat,lng,zoom`), matches the target by CID |
+| `src/engines/search.js` | Organic SERP + Local Finder per point: pack, 1-Box, AI Overview, ads, organic rank |
+| `src/analysis.js` | Full report: AI names and citations, ads, 1-Box, winning radius, affluence SoLV, insights |
+| `src/area.js`, `src/data/iod2025.js` | Point to LSOA to IMD 2025 decile, income decile and population |
 | `src/engines/index.js` | Engine registry; the AI Overviews engine plugs in here |
 | `src/scan.js` | Scan validation, per-point run, scoring |
 | `src/metrics.js` | ARP, ATRP, SoLV, competitor table |

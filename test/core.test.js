@@ -5,6 +5,10 @@ import { buildGrid } from '../src/grid.js';
 import { summarise, competitors } from '../src/metrics.js';
 import { mapsEngine, itemsFromTask, matchesTarget } from '../src/engines/maps.js';
 import { buildScan, runPoint, finaliseScan } from '../src/scan.js';
+import { searchEngine, parseOrganic, parseFinder, combine } from '../src/engines/search.js';
+import { namedInAio } from '../src/analysis.js';
+import { iodFor } from '../src/area.js';
+import { parseDistanceKm, nameKey } from '../src/engines/match.js';
 
 test('grid: 7x7 at 1 km has 49 points, centre in the middle, 1 km steps', () => {
   const pts = buildGrid({ lat: 54.7761, lng: -1.5733, size: 7, spacing: 1 });
@@ -85,6 +89,8 @@ test('scan: demo scan builds, runs every point and scores', async () => {
   assert.equal(scan.summary.scanned, 25);
   assert.ok(scan.summary.found > 0);
   assert.ok(scan.competitors.some((c) => c.isTarget));
+  assert.ok(scan.report.insights.length >= 2);
+  assert.equal(scan.report.search, null);
 });
 
 test('scan: live mode without credentials fails the point as fatal', async () => {
@@ -100,4 +106,121 @@ test('scan: live mode without credentials fails the point as fatal', async () =>
 test('scan: rejects bad input', () => {
   assert.throws(() => buildScan({ keyword: '', target: { cid: '1' } }, { demo: true, engine: mapsEngine }), /Keyword/);
   assert.throws(() => buildScan({ keyword: 'x' }, { demo: true, engine: mapsEngine }), /business/);
+});
+
+
+// ---------- Google Search engine ----------
+
+const organicFixture = {
+  result: [{
+    items: [
+      { type: 'paid', rank_group: 1, rank_absolute: 1, title: 'Ad Co', domain: 'www.adco.co.uk' },
+      { type: 'local_services', rank_group: 1, rank_absolute: 2, items: [{ type: 'local_services_element', title: 'LSA Plumbing', domain: 'lsa.co.uk' }] },
+      { type: 'ai_overview', rank_group: 1, rank_absolute: 3, asynchronous_ai_overview: true, markdown: 'Options near you:\n\n* **Rapid National Plumbing**: 24/7.\n* **Bravo Plumbing Ltd**: local.\n* **Alpha Plumbing**: reviews.\n\n**What to check:** reviews.',
+        items: [{ type: 'ai_overview_element', references: [{ source: 'Yell', domain: 'yell.com', url: 'https://www.yell.com/x', title: 'Yell' }, { source: 'Alpha', domain: 'www.alpha.co.uk', url: 'https://www.alpha.co.uk/', title: 'Alpha' }] }],
+        references: [{ source: 'Yell', domain: 'yell.com', url: 'https://www.yell.com/x', title: 'Yell' }] },
+      { type: 'local_pack', rank_group: 1, rank_absolute: 4, title: 'Bravo Plumbing', description: '0.5 mi · High St', cid: '2', domain: 'bravo.co.uk', is_paid: false, rating: { value: 4.8, votes_count: 50 } },
+      { type: 'local_pack', rank_group: 2, rank_absolute: 5, title: 'Alpha Plumbing', description: '1.2 mi · Low St', cid: '1', domain: 'alpha.co.uk', is_paid: false },
+      { type: 'local_pack', rank_group: 3, rank_absolute: 6, title: 'Charlie Plumbing', description: '3 km', cid: '3', is_paid: false },
+      { type: 'organic', rank_group: 1, rank_absolute: 7, domain: 'www.alpha.co.uk', url: 'https://www.alpha.co.uk/', title: 'Alpha' },
+    ],
+  }],
+};
+const finderFixture = {
+  result: [{
+    items: [
+      { type: 'local_pack', rank_absolute: 1, title: 'Sponsored Co', cid: '9', is_paid: true },
+      { type: 'local_pack', rank_absolute: 2, title: 'Bravo Plumbing', cid: '2', is_paid: false },
+      { type: 'local_pack', rank_absolute: 3, title: 'Charlie Plumbing', cid: '3', is_paid: false },
+      { type: 'local_pack', rank_absolute: 4, title: 'Sponsored Two', cid: '8', is_paid: true },
+      { type: 'local_pack', rank_absolute: 5, title: 'Delta Plumbing', cid: '4', is_paid: false },
+      { type: 'local_pack', rank_absolute: 6, title: 'Alpha Plumbing', cid: '1', is_paid: false },
+    ],
+  }],
+};
+
+test('search: parses pack, ads, AI Overview and organic from a DataForSEO task', () => {
+  const o = parseOrganic(organicFixture);
+  assert.deepEqual(o.pack.map((l) => l.title), ['Bravo Plumbing', 'Alpha Plumbing', 'Charlie Plumbing']);
+  assert.equal(o.pack[0].distanceKm, 0.8);
+  assert.equal(o.single, null);
+  assert.deepEqual(o.ads.map((a) => a.where), ['search', 'local_services']);
+  assert.equal(o.ads[0].domain, 'adco.co.uk');
+  assert.ok(o.aio.markdown.includes('Rapid National'));
+  assert.deepEqual(o.aio.references.map((r) => r.domain), ['yell.com', 'alpha.co.uk']);
+  assert.equal(o.organic[0].domain, 'alpha.co.uk');
+});
+
+test('search: Local Finder drops ads from ranks and counts ads above you', () => {
+  const f = parseFinder(finderFixture);
+  assert.deepEqual(f.list.map((l) => [l.title, l.rank]), [['Bravo Plumbing', 1], ['Charlie Plumbing', 2], ['Delta Plumbing', 3], ['Alpha Plumbing', 4]]);
+  assert.equal(f.ads.length, 2);
+  const target = { cid: '4', title: 'Delta Plumbing', domain: 'delta.co.uk' };
+  const r = combine(parseOrganic(organicFixture), f, target);
+  assert.equal(r.rank, 4); // after the 3-pack
+  assert.equal(r.rankFrom, 'finder');
+  assert.equal(r.finderRank, 3);
+  assert.equal(r.adsAboveYou, 2);
+  const r2 = combine(parseOrganic(organicFixture), f, { cid: '1', title: 'Alpha Plumbing', domain: 'alpha.co.uk' });
+  assert.equal(r2.rank, 2);
+  assert.equal(r2.rankFrom, 'pack');
+  assert.equal(r2.organicRank, 1);
+  assert.equal(r2.distanceKm, 1.93);
+});
+
+test('search: one local result is a single-business (1-Box) point', () => {
+  const one = { result: [{ items: [organicFixture.result[0].items[3]] }] };
+  const r = combine(parseOrganic(one), null, { cid: '2', title: 'Bravo Plumbing' });
+  assert.equal(r.single.title, 'Bravo Plumbing');
+  assert.equal(r.single.isTarget, true);
+  assert.equal(r.rank, 1);
+  assert.equal(r.rankFrom, 'single');
+  const none = combine(parseOrganic({ result: [{ items: [] }] }), null, { cid: '2' });
+  assert.equal(none.noLocal, true);
+  assert.equal(none.rank, null);
+});
+
+test('search: cost per point', () => {
+  assert.equal(searchEngine.costPerPoint({ aio: true, finder: true, device: 'mobile' }), 0.008);
+  assert.equal(searchEngine.costPerPoint({ aio: false, finder: false }), 0.002);
+  assert.equal(searchEngine.costPerPoint({ aio: true, finder: true, device: 'desktop' }), 0.006);
+});
+
+test('ai: names found in order, including bold list items not in local results', () => {
+  const known = new Map([[nameKey('Alpha Plumbing'), 'Alpha Plumbing'], [nameKey('Bravo Plumbing'), 'Bravo Plumbing']]);
+  const named = namedInAio(organicFixture.result[0].items[2].markdown, known);
+  assert.deepEqual(named.map((n) => n.title), ['Rapid National Plumbing', 'Bravo Plumbing', 'Alpha Plumbing']);
+  assert.equal(named[0].local, false);
+  assert.ok(!named.some((n) => /What to check/.test(n.title)));
+});
+
+test('area: IoD 2025 lookup and distance parsing', () => {
+  const d = iodFor('E01000001');
+  assert.ok(d.imdDecile >= 1 && d.imdDecile <= 10 && d.population > 0);
+  assert.equal(iodFor('W01000001'), null);
+  assert.equal(parseDistanceKm('2 mi · x'), 3.22);
+  assert.equal(parseDistanceKm('850 m'), 0.85);
+  assert.equal(parseDistanceKm('no distance'), null);
+});
+
+test('search scan: demo end to end builds the full report', async () => {
+  const [target] = await mapsEngine.findBusiness({ query: 'Ascend Digital Marketing', lat: 54.7761, lng: -1.5733 }, { demo: true });
+  const { scan, points } = buildScan(
+    { engine: 'google_search', keyword: 'seo consultant', target, lat: 54.7761, lng: -1.5733, size: 5, spacing: 1, options: { aio: true, finder: true } },
+    { demo: true, engine: searchEngine },
+  );
+  assert.equal(scan.device, 'mobile');
+  let i = 0;
+  for (const p of points) {
+    await runPoint(scan, p, searchEngine, {}, { areaLookup: () => Promise.resolve({ lsoa: 'E01034493', population: 1500, incomeDecile: 1 + (i++ % 10), imdDecile: 5 }) });
+  }
+  finaliseScan(scan, points, searchEngine);
+  const r = scan.report;
+  assert.equal(scan.status, 'done');
+  assert.ok(r.search.ai.shownAt > 0);
+  assert.ok(r.search.ai.named.length > 0);
+  assert.ok(r.affluence && r.affluence.weightedSolv != null);
+  assert.ok(points.every((p) => p.ai));
+  assert.ok(r.competitors.some((c) => c.isTarget && c.aiNamedAt != null));
+  assert.ok(r.insights.some((x) => x.kind === 'ai'));
 });

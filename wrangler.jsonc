@@ -13,7 +13,7 @@
     "DEFAULT_LNG": "-1.5733",
     "DEFAULT_LOCATION": "United Kingdom",
     "DEFAULT_LANGUAGE": "en",
-    "SCAN_CONCURRENCY": "5"
+    "SCAN_CONCURRENCY": "8"
   },
   "observability": { "enabled": true }
 }

@@ -1,16 +1,14 @@
 // Engine registry. Every engine runs over the same grid.
 //
 // Engine contract:
-//   id, label, costPerPoint
-//   searchPoint(params, { demo, env }) -> Promise<Array<listing>>   (rank-ordered)
+//   id, label, description, costs, costPerPoint(options)
+//   evaluatePoint(params, { demo, env }) -> Promise<{ rank, listings, ...extras }>
 //   matchesTarget(listing, target) -> boolean
-//
-// Phase 2 adds `google_ai_overview` here: organic live/advanced with
-// location_coordinate + load_async_ai_overview, returning AIO references as the "listings".
 
 import { mapsEngine } from './maps.js';
+import { searchEngine } from './search.js';
 
-const engines = { [mapsEngine.id]: mapsEngine };
+const engines = { [mapsEngine.id]: mapsEngine, [searchEngine.id]: searchEngine };
 
 export function getEngine(id) {
   const engine = engines[id];
@@ -19,5 +17,5 @@ export function getEngine(id) {
 }
 
 export function listEngines() {
-  return Object.values(engines).map(({ id, label, costPerPoint }) => ({ id, label, costPerPoint }));
+  return Object.values(engines).map(({ id, label, description, costs }) => ({ id, label, description, costs }));
 }

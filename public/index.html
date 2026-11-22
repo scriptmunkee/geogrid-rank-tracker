@@ -30,8 +30,18 @@
       </section>
 
       <section>
-        <h2><span class="step">2</span> Keyword</h2>
+        <h2><span class="step">2</span> Keyword and scan type</h2>
         <input id="keyword" placeholder="e.g. seo consultant" />
+        <div class="engine-pick" id="enginePick">
+          <label class="engine-opt"><input type="radio" name="engine" value="google_maps" checked />
+            <span><b>Google Maps</b><small>Rank in the Maps app results</small></span></label>
+          <label class="engine-opt"><input type="radio" name="engine" value="google_search" />
+            <span><b>Google Search</b><small>Map pack, 1-Box, AI Overview, ads</small></span></label>
+        </div>
+        <div id="searchOpts" class="search-opts" hidden>
+          <label class="check"><input id="optAio" type="checkbox" checked /> <span>AI Overviews <small>+$0.002 a point, refunded when none shows</small></span></label>
+          <label class="check"><input id="optFinder" type="checkbox" checked /> <span>Rank beyond the top 3 <small>Local Finder, +$0.004 a point on mobile</small></span></label>
+        </div>
       </section>
 
       <section>
@@ -78,20 +88,35 @@
     <main class="main">
       <div id="scanHeader" class="scan-header" hidden></div>
       <div id="progress" class="progress" hidden><div class="bar"></div><span></span></div>
-      <div class="map-wrap">
-        <div id="map"></div>
-        <div class="legend">
-          <span><i style="background:var(--r1)"></i>1 to 3</span>
-          <span><i style="background:var(--r2)"></i>4 to 10</span>
-          <span><i style="background:var(--r3)"></i>11 to 20</span>
-          <span><i style="background:var(--nf)"></i>Not found</span>
+
+      <nav id="tabs" class="tabs" hidden>
+        <button data-tab="overview" class="active">Overview</button>
+        <button data-tab="ai" data-search>AI Overview</button>
+        <button data-tab="competitors">Competitors</button>
+        <button data-tab="points">Points</button>
+      </nav>
+
+      <!-- Overview (also the pre-scan map) -->
+      <section id="tab-overview" class="tab-panel">
+        <div class="map-card">
+          <div class="map-toolbar">
+            <div id="layerBar" class="layer-bar" hidden></div>
+            <div id="focusBar" class="focus-bar" hidden></div>
+          </div>
+          <div class="map-wrap">
+            <div id="map"></div>
+            <div id="legend" class="legend"></div>
+          </div>
         </div>
-      </div>
-      <div id="metrics" class="metrics" hidden></div>
-      <section id="compWrap" class="card" hidden>
-        <h3>Who owns this grid</h3>
-        <div class="table-wrap"><table id="compTable"></table></div>
+        <div id="metrics" class="metrics" hidden></div>
+        <div id="insights" class="card" hidden></div>
+        <div id="overviewGrid" class="two-col" hidden></div>
+        <div id="overviewExtra" class="stack" hidden></div>
       </section>
+
+      <section id="tab-ai" class="tab-panel stack" hidden></section>
+      <section id="tab-competitors" class="tab-panel stack" hidden></section>
+      <section id="tab-points" class="tab-panel" hidden></section>
     </main>
   </div>
 

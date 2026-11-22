@@ -1,7 +1,7 @@
 // Scan lifecycle helpers, independent of storage.
 
 import { buildGrid } from './grid.js';
-import { summarise, competitors } from './metrics.js';
+import { buildReport } from './analysis.js';
 
 function newId() {
   const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12);
@@ -21,6 +21,9 @@ export function buildScan(input, { demo, engine, defaults = {} }) {
   const depth = Number(input.depth ?? 20);
   if (!Number.isInteger(depth) || depth < 1 || depth > 100) throw new Error('Depth must be 1 to 100');
 
+  const device = input.device === 'desktop' ? 'desktop' : input.device === 'mobile' ? 'mobile' : engine.id === 'google_search' ? 'mobile' : 'desktop';
+  const options = engine.id === 'google_search' ? { aio: input.options?.aio !== false, finder: input.options?.finder !== false } : {};
+
   const grid = {
     lat: Number(input.lat),
     lng: Number(input.lng),
@@ -30,6 +33,7 @@ export function buildScan(input, { demo, engine, defaults = {} }) {
     zoom,
   };
   const points = buildGrid(grid).map((p) => ({ ...p, rank: null, listings: [], error: null }));
+  const perPoint = engine.costPerPoint({ ...options, device });
 
   const scan = {
     id: newId(),
@@ -37,9 +41,10 @@ export function buildScan(input, { demo, engine, defaults = {} }) {
     status: 'running',
     demo,
     engine: engine.id,
+    options,
     keyword,
     languageCode: input.languageCode || defaults.languageCode || 'en',
-    device: input.device === 'mobile' ? 'mobile' : 'desktop',
+    device,
     depth,
     target: {
       title: t.title ? String(t.title).slice(0, 200) : null,
@@ -51,48 +56,55 @@ export function buildScan(input, { demo, engine, defaults = {} }) {
       lng: Number.isFinite(t.lng) ? t.lng : null,
     },
     grid,
-    estCost: demo ? 0 : Math.round(points.length * engine.costPerPoint * 1000) / 1000,
+    costPerPoint: demo ? 0 : perPoint,
+    estCost: demo ? 0 : Math.round(points.length * perPoint * 1000) / 1000,
     summary: null,
     competitors: [],
+    report: null,
     error: null,
     finishedAt: null,
   };
   return { scan, points };
 }
 
-/** Search one point and record the target's rank. Mutates and returns the point. */
-export async function runPoint(scan, point, engine, env) {
+/** Search one point (and optionally look up its area). Mutates and returns the point. */
+export async function runPoint(scan, point, engine, env, { areaLookup } = {}) {
+  const work = engine.evaluatePoint(
+    {
+      keyword: scan.keyword,
+      lat: point.lat,
+      lng: point.lng,
+      zoom: scan.grid.zoom,
+      depth: scan.depth,
+      languageCode: scan.languageCode,
+      device: scan.device,
+      options: scan.options || {},
+      centre: { lat: scan.grid.lat, lng: scan.grid.lng },
+      target: scan.target,
+    },
+    { demo: scan.demo, env },
+  );
+  const area = areaLookup && point.area === undefined ? areaLookup(point.lat, point.lng) : null;
   try {
-    const listings = await engine.searchPoint(
-      {
-        keyword: scan.keyword,
-        lat: point.lat,
-        lng: point.lng,
-        zoom: scan.grid.zoom,
-        depth: scan.depth,
-        languageCode: scan.languageCode,
-        device: scan.device,
-        centre: { lat: scan.grid.lat, lng: scan.grid.lng },
-        target: scan.target,
-      },
-      { demo: scan.demo, env },
-    );
-    point.listings = listings.slice(0, scan.depth);
-    const hit = point.listings.find((l) => engine.matchesTarget(l, scan.target));
-    point.rank = hit ? hit.rank : null;
+    const result = await work;
+    Object.assign(point, result);
+    point.listings = (result.listings || []).slice(0, scan.depth);
     point.error = null;
   } catch (err) {
     point.error = err.message || 'Search failed';
     point.fatal = err.code === 'auth' || err.code === 'no_credentials';
   }
+  if (area) point.area = await area;
   return point;
 }
 
-/** Score a finished scan. Mutates and returns the scan. */
+/** Score a finished scan. Mutates scan and points (adds per-point AI analysis). */
 export function finaliseScan(scan, points, engine) {
-  scan.summary = summarise(points, scan.depth);
-  scan.competitors = competitors(points, scan.depth, engine.matchesTarget, scan.target);
-  scan.status = scan.summary.scanned === 0 ? 'failed' : 'done';
+  const report = buildReport(scan, points, engine);
+  scan.report = report;
+  scan.summary = report.summary;
+  scan.competitors = report.competitors;
+  scan.status = report.summary.scanned === 0 ? 'failed' : 'done';
   if (scan.status === 'failed') scan.error = scan.error || points.find((p) => p.error)?.error || 'No points returned data';
   scan.finishedAt = new Date().toISOString();
   return scan;

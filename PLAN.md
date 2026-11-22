@@ -46,25 +46,29 @@ Depth 20 costs the same as depth 100 (billed per 100 results).
 - [x] Demo mode (no API calls) for testing the UI
 - [x] Engine interface so new "engines" plug into the same grid
 
-### Phase 2: AI Overviews engine
-Same grid, different engine: `POST /v3/serp/google/organic/live/advanced` with
-`location_coordinate: "lat,lng,radius"` and `load_async_ai_overview: true` (+$0.002 per point, refunded when no AIO loads).
+### Phase 2: Google Search engine (built)
+Same grid, second scan type. Per point: `POST /v3/serp/google/organic/live/advanced` (mobile, `location_coordinate: lat,lng,200`, `load_async_ai_overview: true`) plus `POST /v3/serp/google/local_finder/live/advanced` (20 results).
 
-Per point we would record:
-
-| Field | Source |
+| Recorded per point | Source |
 |---|---|
-| AIO shown? | `ai_overview` item present |
-| Target cited? | target domain in the AIO `references` |
-| Citation position | order of the target in `references` |
-| Cited competitors | other reference domains (builds an AIO "share of voice") |
-| Local pack rank | `local_pack` items in the same SERP (free extra signal) |
+| Map pack position | `local_pack` items (non-paid) |
+| Single-business result (1-Box) | one `local_pack` item, or a `knowledge_graph` with a CID and no pack |
+| Rank beyond the top 3 | Local Finder, ads removed |
+| Ads above you | paid Local Finder listings above you; `paid`, `local_services` and paid pack items |
+| AI Overview shown, text, sources | `ai_overview` item, its `markdown` and `references` |
+| Businesses the AI named, in order | names from all local results matched in the AI text, plus bold list items |
+| Your site cited | your domain in the AI references |
+| Your organic position | `organic` items |
+| Area | postcodes.io (LSOA 2021) + English Indices of Deprivation 2025 |
 
-First job in phase 2 is a validation test: run one keyword on a 5 x 5 grid and confirm whether AIO content and citations actually change by coordinate. If AIOs barely move with location, the grid should widen (city-to-city rather than street-to-street).
+Cost: $0.002 base + $0.002 AI Overview (refunded when none) + $0.004 Local Finder on mobile = $0.008 a point (7x7 is about $0.39).
+
+Results screens: Overview (map layers for rank, AI Overview, ads, area affluence; metric cards; insights; rank distribution; rank by distance; who holds #1; 1-Box and paid pressure panels), AI Overview (coverage, websites cited by type, businesses named vs local order), Competitors (leaderboard, click to map a competitor, CSV), Points (grid plus full per-point detail).
 
 ### Phase 3: running it properly
 - Standard queue mode (task_post, tasks_ready, task_get) to cut cost by 70%
 - Scheduled rescans (weekly) and scan-to-scan comparison
 - Multi-keyword scans per business
+- Scan-to-scan comparison of AI Overview presence
 - Export (CSV, shareable report page)
 
